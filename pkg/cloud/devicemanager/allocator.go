@@ -17,7 +17,8 @@ limitations under the License.
 package devicemanager
 
 import (
-	"fmt"
+	"errors"
+	"sync"
 )
 
 // ExistingNames is a map of assigned device names. Presence of a key with a device
@@ -34,36 +35,40 @@ type ExistingNames map[string]string
 // call), so all available device names are used eventually and it minimizes
 // device name reuse.
 type NameAllocator interface {
-	// GetNext returns a free device name or error when there is no free device
-	// name. The prefix (such as "/dev/xvd" or "/dev/sd") is passed as a parameter.
-	GetNext(existingNames ExistingNames, prefix string) (name string, err error)
+	GetNext(existingNames ExistingNames, likelyBadNames *sync.Map) (name string, err error)
 }
 
 type nameAllocator struct{}
 
 var _ NameAllocator = &nameAllocator{}
 
-// GetNext gets next available device given existing names that are being used
-// This function iterate through the device names in deterministic order of:
+// GetNext returns a free device name or error when there is no free device name
+// It does this by using a list of legal EBS device names from device_names.go
 //
-//	aa, ..., az, ba, ..., bz, ..., ..., dx
-//
-// and return the first one that is not used yet.
-// We stop at dx because EBS performs undocumented validation on the device
-// name that refuses to mount devices after /dev/xvddx
-func (d *nameAllocator) GetNext(existingNames ExistingNames, prefix string) (string, error) {
-	for c1 := 'a'; c1 <= 'd'; c1++ {
-		c2end := 'z'
-		if c1 == 'd' {
-			c2end = 'x'
-		}
-		for c2 := 'a'; c2 <= c2end; c2++ {
-			name := fmt.Sprintf("%s%s%s", prefix, string(c1), string(c2))
-			if _, found := existingNames[name]; !found {
-				return name, nil
-			}
+// likelyBadNames is a map of names that have previously returned an "in use" error when attempting to mount to them
+// These names are unlikely to result in a successful mount, and may be permanently unavailable, so use them last.
+func (d *nameAllocator) GetNext(existingNames ExistingNames, likelyBadNames *sync.Map) (string, error) {
+	for _, name := range deviceNames {
+		_, existing := existingNames[name]
+		_, likelyBad := likelyBadNames.Load(name)
+		if !existing && !likelyBad {
+			return name, nil
 		}
 	}
 
-	return "", fmt.Errorf("there are no names available")
+	finalResortName := ""
+	likelyBadNames.Range(func(name, _ interface{}) bool {
+		if name, ok := name.(string); ok {
+			if _, existing := existingNames[name]; !existing {
+				finalResortName = name
+				return false
+			}
+		}
+		return true
+	})
+	if finalResortName != "" {
+		return finalResortName, nil
+	}
+
+	return "", errors.New("there are no names available")
 }

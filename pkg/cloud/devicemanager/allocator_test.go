@@ -17,6 +17,7 @@ limitations under the License.
 package devicemanager
 
 import (
+	"sync"
 	"testing"
 )
 
@@ -24,34 +25,64 @@ func TestNameAllocator(t *testing.T) {
 	existingNames := map[string]string{}
 	allocator := nameAllocator{}
 
-	tests := []struct {
-		expectedName string
-	}{
-		{"aa"}, {"ab"}, {"ac"}, {"ad"}, {"ae"}, {"af"}, {"ag"}, {"ah"}, {"ai"}, {"aj"},
-		{"ak"}, {"al"}, {"am"}, {"an"}, {"ao"}, {"ap"}, {"aq"}, {"ar"}, {"as"}, {"at"},
-		{"au"}, {"av"}, {"aw"}, {"ax"}, {"ay"}, {"az"},
-		{"ba"}, {"bb"}, {"bc"}, {"bd"}, {"be"}, {"bf"}, {"bg"}, {"bh"}, {"bi"}, {"bj"},
-		{"bk"}, {"bl"}, {"bm"}, {"bn"}, {"bo"}, {"bp"}, {"bq"}, {"br"}, {"bs"}, {"bt"},
-		{"bu"}, {"bv"}, {"bw"}, {"bx"}, {"by"}, {"bz"},
-		{"ca"}, {"cb"}, {"cc"}, {"cd"}, {"ce"}, {"cf"}, {"cg"}, {"ch"}, {"ci"}, {"cj"},
-		{"ck"}, {"cl"}, {"cm"}, {"cn"}, {"co"}, {"cp"}, {"cq"}, {"cr"}, {"cs"}, {"ct"},
-		{"cu"}, {"cv"}, {"cw"}, {"cx"}, {"cy"}, {"cz"},
-		{"da"}, {"db"}, {"dc"}, {"dd"}, {"de"}, {"df"}, {"dg"}, {"dh"}, {"di"}, {"dj"},
-		{"dk"}, {"dl"}, {"dm"}, {"dn"}, {"do"}, {"dp"}, {"dq"}, {"dr"}, {"ds"}, {"dt"},
-		{"du"}, {"dv"}, {"dw"}, {"dx"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.expectedName, func(t *testing.T) {
-			actual, err := allocator.GetNext(existingNames, "")
+	for _, name := range deviceNames {
+		t.Run(name, func(t *testing.T) {
+			actual, err := allocator.GetNext(existingNames, new(sync.Map))
 			if err != nil {
-				t.Errorf("test %q: unexpected error: %v", test.expectedName, err)
+				t.Errorf("test %q: unexpected error: %v", name, err)
 			}
-			if actual != test.expectedName {
-				t.Errorf("test %q: expected %q, got %q", test.expectedName, test.expectedName, actual)
+			if actual != name {
+				t.Errorf("test %q: expected %q, got %q", name, name, actual)
 			}
 			existingNames[actual] = ""
 		})
+	}
+}
+
+func TestNameAllocatorLikelyBadName(t *testing.T) {
+	skippedNameExisting := deviceNames[11]
+	skippedNameNew := deviceNames[32]
+	likelyBadNames := new(sync.Map)
+	likelyBadNames.Store(skippedNameExisting, struct{}{})
+	likelyBadNames.Store(skippedNameNew, struct{}{})
+	existingNames := map[string]string{
+		skippedNameExisting: "",
+	}
+	allocator := nameAllocator{}
+
+	for _, name := range deviceNames {
+		if name == skippedNameExisting || name == skippedNameNew {
+			// Names in likelyBadNames should be skipped until it is the last available name
+			continue
+		}
+
+		t.Run(name, func(t *testing.T) {
+			actual, err := allocator.GetNext(existingNames, likelyBadNames)
+			if err != nil {
+				t.Errorf("test %q: unexpected error: %v", name, err)
+			}
+			if actual != name {
+				t.Errorf("test %q: expected %q, got %q", name, name, actual)
+			}
+			existingNames[actual] = ""
+		})
+	}
+
+	// Test likely bad name fallback when it is the only device name available
+	// We should receive the likely bad device name because it is the only option left
+	lastName, _ := allocator.GetNext(existingNames, likelyBadNames)
+	if lastName != skippedNameNew {
+		t.Errorf("test %q: expected %q, got %q (likelyBadNames fallback)", skippedNameNew, skippedNameNew, lastName)
+	}
+	existingNames[skippedNameNew] = ""
+
+	// Test likely bad name fallback when the likely bad device name already exists
+	// Because the device name already exists, this should return an error
+	onlyExisting := new(sync.Map)
+	onlyExisting.Store(skippedNameExisting, struct{}{})
+	_, err := allocator.GetNext(existingNames, onlyExisting)
+	if err == nil {
+		t.Errorf("got nil when error expected (likelyBadNames with only existing names)")
 	}
 }
 
@@ -59,12 +90,11 @@ func TestNameAllocatorError(t *testing.T) {
 	allocator := nameAllocator{}
 	existingNames := map[string]string{}
 
-	// 102 == number of allocations from aa ... dx (see allocator.go for why we stop at dx)
-	for i := 0; i < 102; i++ {
-		name, _ := allocator.GetNext(existingNames, "/dev/xvd")
+	for range deviceNames {
+		name, _ := allocator.GetNext(existingNames, new(sync.Map))
 		existingNames[name] = ""
 	}
-	name, err := allocator.GetNext(existingNames, "/dev/xvd")
+	name, err := allocator.GetNext(existingNames, new(sync.Map))
 	if err == nil {
 		t.Errorf("expected error, got device  %q", name)
 	}
