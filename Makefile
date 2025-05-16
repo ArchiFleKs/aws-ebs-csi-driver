@@ -212,6 +212,10 @@ update-sidecar-dependencies: update-truth-sidecars generate-sidecar-tags update/
 update-image-dependencies: update-sidecar-dependencies
 	./hack/release-scripts/update-e2e-images
 
+.PHONY: security
+security: bin/govulncheck
+	./hack/tools/check-security.sh
+
 ## CI aliases
 # Targets intended to be executed mostly or only by CI jobs
 
@@ -307,6 +311,7 @@ update/mockgen: bin/mockgen
 .PHONY: update/gomod
 update/gomod:
 	go mod tidy
+	go mod tidy -C tests/e2e/
 
 .PHONY: update/shfmt
 update/shfmt: bin/shfmt

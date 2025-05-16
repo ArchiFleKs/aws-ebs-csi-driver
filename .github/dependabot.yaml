@@ -16,7 +16,7 @@ version: 2
 enable-beta-ecosystems: true
 updates:
 - package-ecosystem: gomod
-  directory: "/"
+  directories: ["/", "/tests/e2e/"]
   allow:
   - dependency-type: "all"
   schedule:
@@ -40,6 +40,7 @@ updates:
   labels:
     - "area/dependency"
     - "ok-to-test"
+    - "release-note-none"
 - package-ecosystem: "github-actions"
   directory: "/"
   schedule:
@@ -55,3 +56,4 @@ updates:
   labels:
     - "area/dependency"
     - "ok-to-test"
+    - "release-note-none"
